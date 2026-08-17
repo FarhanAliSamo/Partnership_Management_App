@@ -1,0 +1,51 @@
+{
+  "expo": {
+    "name": "F CRM",
+    "slug": "f-crm",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "fcrm",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#0B1220"
+    },
+    "ios": {
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSFaceIDUsageDescription": "F CRM uses Face ID to securely lock the app.",
+        "NSCameraUsageDescription": "F CRM uses the camera to attach photos to financial records.",
+        "NSPhotoLibraryUsageDescription": "F CRM uses your photo library to attach photos to financial records."
+      },
+      "bundleIdentifier": "com.fcrm.app"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0B1220"
+      },
+      "package": "com.fcrm.app",
+      "permissions": [
+        "CAMERA",
+        "USE_BIOMETRIC",
+        "USE_FINGERPRINT",
+        "READ_EXTERNAL_STORAGE"
+      ]
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-local-authentication",
+      "expo-notifications",
+      "expo-sqlite",
+      "expo-image-picker",
+      "expo-asset",
+      "expo-font",
+      "@react-native-community/datetimepicker"
+    ],
+    "experiments": {
+      "typedRoutes": true
+    }
+  }
+}
