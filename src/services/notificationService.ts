@@ -30,14 +30,15 @@ export async function scheduleDailyReminderIfNeeded(): Promise<void> {
   const settings = await getAllSettings();
   if (!settings.dailyReminderEnabled) return;
 
+  // A newly recorded earning/closed day must also remove an earlier reminder.
+  await Notifications.cancelAllScheduledNotificationsAsync();
+
   const today = todayISO();
   const [earnings, status] = await Promise.all([
     getEarningsForDate(today),
     getDailyStatusForDate(today),
   ]);
   if (earnings.length > 0 || status) return; // already recorded
-
-  await Notifications.cancelAllScheduledNotificationsAsync();
 
   const [h, m] = settings.dailyReminderTime.split(':').map((n) => parseInt(n, 10));
   const trigger = new Date();

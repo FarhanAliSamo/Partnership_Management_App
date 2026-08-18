@@ -31,7 +31,7 @@ export function format(
   locale = 'en-PK'
 ): string {
   const major = toMajor(minor, minorUnits);
-  const symbol = currency === 'PKR' ? 'Rs.' : currency;
+  const symbol = currency === 'PKR' ? 'PKR' : currency;
   const digits = minorUnits === 0 ? 0 : 2;
   const formatted = major.toLocaleString(locale, {
     minimumFractionDigits: digits,

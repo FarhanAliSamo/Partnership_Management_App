@@ -68,6 +68,16 @@ export async function upsertUser(user: {
   );
 }
 
+export async function updateDisplayName(id: ID, displayName: string): Promise<void> {
+  await enqueueWrite(() =>
+    exec('UPDATE users SET display_name = ?, updated_at = ? WHERE id = ?', [
+      displayName,
+      new Date().toISOString(),
+      id,
+    ])
+  );
+}
+
 export async function setUserPasscodeHash(id: ID, hash: string): Promise<void> {
   await enqueueWrite(() =>
     exec('UPDATE users SET passcode_hash = ?, updated_at = ? WHERE id = ?', [
@@ -102,4 +112,13 @@ export async function getBiometricEnabled(id: ID): Promise<boolean> {
     [id]
   );
   return row ? row.biometric_enabled === 1 : false;
+}
+
+export async function deleteUserById(id: ID): Promise<void> {
+  await enqueueWrite(() => exec('DELETE FROM users WHERE id = ?', [id]));
+}
+
+export async function countUsers(): Promise<number> {
+  const row = await queryFirst<{ n: number }>('SELECT COUNT(*) AS n FROM users');
+  return row ? row.n : 0;
 }

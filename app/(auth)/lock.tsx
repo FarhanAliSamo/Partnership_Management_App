@@ -21,7 +21,7 @@ export default function LockScreen() {
 
   const [passcode, setPasscode] = useState('');
   const [error, setError] = useState<string | null>(null);
-  const [triedBio, setTriedBio] = useState(false);
+  const [checking, setChecking] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
@@ -39,7 +39,9 @@ export default function LockScreen() {
       } catch {
         // fall through to passcode
       }
-      if (!cancelled) setTriedBio(true);
+      if (!cancelled) {
+        setChecking(false);
+      }
     })();
     return () => {
       cancelled = true;
@@ -47,8 +49,10 @@ export default function LockScreen() {
   }, [router]);
 
   const unlock = async () => {
-    const defaultPass = user?.role_key === 'admin' ? 'admin123' : 'manager123';
-    if (passcode === defaultPass || passcode === 'admin123' || passcode === 'manager123') {
+    if (!user) return;
+    setError(null);
+    const ok = await authService.verifyUserPasscode(user.id, passcode);
+    if (ok) {
       router.replace('/(tabs)');
     } else {
       setError('Incorrect passcode.');
@@ -59,7 +63,6 @@ export default function LockScreen() {
     setError(null);
     const ok = await authenticateWithBiometrics('Unlock F CRM');
     if (ok) router.replace('/(tabs)');
-    else setTriedBio(true);
   };
 
   return (
@@ -72,16 +75,18 @@ export default function LockScreen() {
           Unlock with biometric or your passcode.
         </Text>
 
-        {triedBio ? (
+        {checking ? (
+          <Text style={{ color: palette.textSecondary, fontSize: 14 }}>Checking biometric…</Text>
+        ) : (
           <>
             <TextField label="Passcode" value={passcode} onChangeText={setPasscode} secureTextEntry />
             {error ? <Text style={{ color: palette.danger, marginBottom: 12 }}>{error}</Text> : null}
             <Button title="Unlock" onPress={unlock} />
             <View style={{ height: 10 }} />
             <Button title="Use Face ID / Fingerprint" variant="ghost" onPress={retryBio} />
+            <View style={{ height: 10 }} />
+            <Button title="Sign out and use another account" variant="secondary" onPress={async () => { await useAuthStore.getState().logout(); router.replace('/(auth)/login'); }} />
           </>
-        ) : (
-          <Text style={{ color: palette.textSecondary, fontSize: 14 }}>Checking biometric…</Text>
         )}
       </View>
     </Screen>

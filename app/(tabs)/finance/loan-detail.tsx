@@ -1,13 +1,14 @@
 import { useState } from 'react';
 import { View, Text, FlatList } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
-import { Screen, Card, MoneyText, Button, TextField, SheetModal } from '@/components/ui';
+import { Screen, Card, MoneyText, Button, TextField, SheetModal, Badge } from '@/components/ui';
 import { useTheme } from '@/theme/useTheme';
 import { useLoanDetail } from '@/hooks';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useToastStore } from '@/stores/useToastStore';
 import { addRepayment } from '@/services/financeService';
 import { loanDirectionLabel } from '@/components/domain';
+import { LOAN_STATUS_LABELS } from '@/constants/enums';
 import { MoneyField } from '@/components/fields';
 import { toUserMessage } from '@/services/errors';
 import { parseIntAmount } from '@/services/calculation/money';
@@ -23,6 +24,7 @@ export default function LoanDetailScreen() {
   const user = useAuthStore((s) => s.user);
   const showToast = useToastStore((s) => s.show);
   const { loan, repayments, loading, reload } = useLoanDetail(id ?? null);
+  const viewer = user?.role_key === 'manager' ? 'manager' : 'admin';
 
   const [showRepay, setShowRepay] = useState(false);
   const [amount, setAmount] = useState('');
@@ -69,11 +71,11 @@ export default function LoanDetailScreen() {
       <Card style={{ marginBottom: 12 }}>
         <Text style={{ color: palette.textSecondary, fontSize: 13 }}>Original Amount</Text>
         <MoneyText minor={loan.amount_minor} style={{ fontSize: 26, fontWeight: '700' }} />
-        <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 }}>
+        <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 }}>
           <Text style={{ color: palette.textMuted, fontSize: 12 }}>
-            {loanDirectionLabel(loan)}
+            {loanDirectionLabel(loan, viewer)}
           </Text>
-          <Text style={{ color: palette.textMuted, fontSize: 12 }}>{loan.status}</Text>
+          <Badge label={LOAN_STATUS_LABELS[loan.status] ?? loan.status} tone={loan.status === 'paid' ? 'success' : 'warning'} />
         </View>
       </Card>
 
@@ -96,6 +98,12 @@ export default function LoanDetailScreen() {
                 <MoneyText minor={item.amount_minor} style={{ fontWeight: '600' }} />
                 <Text style={{ color: palette.textMuted, fontSize: 12 }}>{formatDateDisplay(item.business_date)}</Text>
               </View>
+              {item.note ? (
+                <Text style={{ color: palette.textSecondary, fontSize: 13, marginTop: 4 }}>{item.note}</Text>
+              ) : null}
+              {item.source === 'settlement' ? (
+                <Text style={{ color: palette.info, fontSize: 12, marginTop: 4 }}>From monthly settlement</Text>
+              ) : null}
             </Card>
           )}
         />

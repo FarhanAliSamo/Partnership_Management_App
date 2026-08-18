@@ -8,6 +8,7 @@ import { validationError, notFound, permissionDenied } from './errors';
 import { canForUser, PermissionKey } from './permissionService';
 import { WIFI_CATEGORY } from '@/constants/categories';
 import { invalidateData } from '@/lib/dataEvents';
+import { scheduleDailyReminderIfNeeded } from './notificationService';
 import type {
   User,
   Earning,
@@ -62,15 +63,26 @@ async function recordActivity(user: User, action: string, recordType: string, re
 
 const fmt = (minor: number, units = 2) => calc.money.format(minor, 'PKR', units);
 
+/** Guard the database boundary: money is always stored as whole minor units. */
+function requireMinorAmount(amount: number, message: string, allowZero = false): void {
+  if (!Number.isSafeInteger(amount) || (allowZero ? amount < 0 : amount <= 0)) {
+    throw validationError(message);
+  }
+}
+
 /* ------------------------------- Earnings ------------------------------- */
 
 export async function addEarning(
   user: User,
-  input: { business_date: string; amount_minor: number; note?: string | null }
+  input: { business_date: string; amount_minor: number; note?: string | null; cash_holder?: 'split' | 'admin' | 'manager' }
 ): Promise<Earning> {
   requirePermission(user, 'earning:create');
-  if (input.amount_minor < 0) throw validationError('Earning cannot be negative.');
+  requireMinorAmount(input.amount_minor, 'Earning must be zero or a positive whole amount.', true);
   if (!input.business_date) throw validationError('Date is required.');
+  const dayStatus = await repo.getDailyStatusForDate(input.business_date);
+  if (dayStatus?.status === 'closed') {
+    throw validationError('This date is marked closed. Reopen it before adding an earning.');
+  }
 
   const e: Earning = {
     id: newId(),
@@ -82,6 +94,37 @@ export async function addEarning(
   await repo.insertEarning(e);
   await enqueueOp('earning', e.id, 'create', e);
   await recordActivity(user, 'created', 'earning', e.id, `${user.display_name} added earning: ${fmt(e.amount_minor)}`);
+
+  // If one partner retained the entire day’s cash, the other partner's exact
+  // split becomes a transparent partner-to-partner loan automatically.
+  if (input.cash_holder && input.cash_holder !== 'split') {
+    const settings = await getAllSettings();
+    const shares = calc.split.split({
+      totalMinor: e.amount_minor,
+      adminPercent: settings.adminSharePercent,
+      managerPercent: settings.managerSharePercent,
+    });
+    const borrower = input.cash_holder;
+    const loanAmount = borrower === 'manager' ? shares.adminMinor : shares.managerMinor;
+    if (loanAmount > 0) {
+      const loan: Loan = {
+        id: newId(),
+        lender: borrower === 'manager' ? 'admin' : 'manager',
+        borrower,
+        amount_minor: loanAmount,
+        business_date: e.business_date,
+        reason: `Daily earning share · ${e.business_date}`,
+        notes: `Created automatically because ${borrower === 'manager' ? 'manager' : 'admin'} retained the full daily cash.`,
+        status: 'active',
+        remaining_minor: loanAmount,
+        ...newRecord(user.id),
+      };
+      await repo.insertLoan(loan);
+      await enqueueOp('loan', loan.id, 'create', loan);
+      await recordActivity(user, 'created', 'loan', loan.id, `${user.display_name} recorded daily cash held as a loan: ${fmt(loanAmount)}`);
+    }
+  }
+  void scheduleDailyReminderIfNeeded().catch(() => undefined);
   return e;
 }
 
@@ -93,7 +136,7 @@ export async function updateEarning(
   requirePermission(user, 'earning:edit');
   const existing = await repo.getEarningById(id);
   if (!existing) throw notFound('Earning not found.');
-  if (input.amount_minor < 0) throw validationError('Earning cannot be negative.');
+  requireMinorAmount(input.amount_minor, 'Earning must be zero or a positive whole amount.', true);
 
   const updated: Earning = {
     ...existing,
@@ -127,6 +170,10 @@ export async function markClosedDay(
   input: { business_date: string; reason?: string | null }
 ): Promise<DailyBusinessStatus> {
   requirePermission(user, 'closed_day:create');
+  const earnings = await repo.getEarningsForDate(input.business_date);
+  if (earnings.length > 0) {
+    throw validationError('This date already has earnings. Remove them before marking the shop closed.');
+  }
   const d: DailyBusinessStatus = {
     id: newId(),
     business_date: input.business_date,
@@ -137,6 +184,7 @@ export async function markClosedDay(
   await repo.upsertDailyStatus(d);
   await enqueueOp('daily_status', d.id, 'create', d);
   await recordActivity(user, 'closed_day', 'daily_status', d.id, `${user.display_name} marked ${d.business_date} as closed`);
+  void scheduleDailyReminderIfNeeded().catch(() => undefined);
   return d;
 }
 
@@ -165,7 +213,7 @@ export async function addExpense(
   input: { business_date: string; amount_minor: number; category: string; description: string; notes?: string | null; is_wifi?: boolean }
 ): Promise<Expense> {
   requirePermission(user, 'expense:create');
-  if (input.amount_minor <= 0) throw validationError('Expense must be greater than zero.');
+  requireMinorAmount(input.amount_minor, 'Expense must be greater than zero.');
   if (!input.category) throw validationError('Category is required.');
 
   const isWifi = input.is_wifi || input.category === WIFI_CATEGORY;
@@ -230,7 +278,7 @@ export async function addInvestment(
   input: { item_name: string; amount_minor: number; business_date: string; category: string; description: string; contributor: Investment['contributor'] }
 ): Promise<Investment> {
   requirePermission(user, 'investment:create');
-  if (input.amount_minor <= 0) throw validationError('Investment must be greater than zero.');
+  requireMinorAmount(input.amount_minor, 'Investment must be greater than zero.');
   const i: Investment = {
     id: newId(),
     item_name: input.item_name,
@@ -283,7 +331,8 @@ export async function addLoan(
   input: { lender: Loan['lender']; borrower: Loan['borrower']; amount_minor: number; business_date: string; reason: string; notes?: string | null }
 ): Promise<Loan> {
   requirePermission(user, 'loan:create');
-  if (input.amount_minor <= 0) throw validationError('Loan amount must be greater than zero.');
+  requireMinorAmount(input.amount_minor, 'Loan amount must be greater than zero.');
+  if (input.lender === input.borrower) throw validationError('A loan needs two different partners.');
   const l: Loan = {
     id: newId(),
     lender: input.lender,
@@ -309,7 +358,7 @@ export async function addRepayment(
   requirePermission(user, 'repayment:create');
   const loan = await repo.getLoanById(input.loan_id);
   if (!loan) throw notFound('Loan not found.');
-  if (input.amount_minor <= 0) throw validationError('Repayment must be greater than zero.');
+  requireMinorAmount(input.amount_minor, 'Repayment must be greater than zero.');
   if (input.amount_minor > loan.remaining_minor) throw validationError('Repayment exceeds remaining balance.');
 
   const r: LoanRepayment = {
@@ -352,6 +401,12 @@ export async function deleteLoan(user: User, id: string): Promise<void> {
 
 export async function generateSettlement(user: User, month: string): Promise<MonthlySettlement> {
   requirePermission(user, 'settlement:manage');
+  if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)) {
+    throw validationError('Enter a valid month in YYYY-MM format.');
+  }
+  if (await repo.getSettlementByMonth(month)) {
+    throw validationError('A settlement already exists for this month.');
+  }
 
   const start = `${month}-01`;
   const end = `${month}-31`;
@@ -387,6 +442,15 @@ export async function generateSettlement(user: User, month: string): Promise<Mon
   return s;
 }
 
+export async function deleteSettlement(user: User, id: string): Promise<void> {
+  requirePermission(user, 'settlement:manage');
+  const existing = await repo.getSettlementById(id);
+  if (!existing) throw notFound('Settlement not found.');
+  await repo.deleteSettlement(id);
+  await enqueueOp('settlement', id, 'delete', { id });
+  await recordActivity(user, 'deleted', 'settlement', id, `${user.display_name} deleted settlement ${existing.month}`);
+}
+
 export async function allocateManagerShare(
   user: User,
   settlementId: string,
@@ -396,6 +460,11 @@ export async function allocateManagerShare(
 
   const settlement = await repo.getSettlementById(settlementId);
   if (!settlement) throw notFound('Settlement not found.');
+
+  const existingAllocations = await repo.getAllocationsForSettlement(settlement.id);
+  if (existingAllocations.some((allocation) => allocation.partner === 'manager')) {
+    throw validationError('The manager share has already been allocated for this settlement.');
+  }
 
   const activeLoans = await repo.getActiveLoans();
   // Manager owes admin = loans where borrower = manager
@@ -428,50 +497,61 @@ export async function allocateManagerShare(
 
   let updatedLoan: Loan | undefined;
   if (allocation.loanPaymentMinor > 0) {
-    const targetLoanId = input.loanId ?? activeLoans.find((l) => l.borrower === 'manager')?.id;
-    if (!targetLoanId) throw validationError('No active loan to repay.');
-    const loan = await repo.getLoanById(targetLoanId);
-    if (!loan) throw notFound('Loan not found.');
+    const eligibleLoans = input.loanId
+      ? activeLoans.filter((loan) => loan.id === input.loanId && loan.borrower === 'manager')
+      : activeLoans.filter((loan) => loan.borrower === 'manager');
+    if (eligibleLoans.length === 0) throw validationError('No active manager loan is available to repay.');
 
-    const repay: LoanRepayment = {
-      id: newId(),
-      loan_id: loan.id,
-      amount_minor: allocation.loanPaymentMinor,
-      business_date: new Date().toISOString().slice(0, 10),
-      note: `Settlement repayment - ${settlement.month}`,
-      source: 'settlement',
-      settlement_id: settlement.id,
-      ...newRecord(user.id),
-    };
-    await repo.insertRepayment(repay);
-    await enqueueOp('repayment', repay.id, 'create', repay);
+    // A settlement may cover several loans. Apply oldest loans first so a
+    // repayment can never exceed the balance of the first loan in the list.
+    const orderedLoans = [...eligibleLoans].sort((a, b) => a.created_at.localeCompare(b.created_at));
+    let remainingToApply = allocation.loanPaymentMinor;
+    for (const loan of orderedLoans) {
+      if (remainingToApply <= 0) break;
+      const amount = Math.min(remainingToApply, loan.remaining_minor);
+      const repay: LoanRepayment = {
+        id: newId(),
+        loan_id: loan.id,
+        amount_minor: amount,
+        business_date: new Date().toISOString().slice(0, 10),
+        note: `Settlement repayment - ${settlement.month}`,
+        source: 'settlement',
+        settlement_id: settlement.id,
+        ...newRecord(user.id),
+      };
+      await repo.insertRepayment(repay);
+      await enqueueOp('repayment', repay.id, 'create', repay);
 
-    const remaining = Math.max(0, loan.remaining_minor - allocation.loanPaymentMinor);
-    updatedLoan = {
-      ...loan,
-      remaining_minor: remaining,
-      status: remaining <= 0 ? 'paid' : 'active',
-      updated_by: user.id,
-      updated_at: new Date().toISOString(),
-      sync_state: 'pending',
-      local_version: loan.local_version + 1,
-    };
-    await repo.updateLoan(updatedLoan);
-    await enqueueOp('loan', updatedLoan.id, 'update', updatedLoan);
+      const remaining = loan.remaining_minor - amount;
+      updatedLoan = {
+        ...loan,
+        remaining_minor: remaining,
+        status: remaining === 0 ? 'paid' : 'active',
+        updated_by: user.id,
+        updated_at: new Date().toISOString(),
+        sync_state: 'pending',
+        local_version: loan.local_version + 1,
+      };
+      await repo.updateLoan(updatedLoan);
+      await enqueueOp('loan', updatedLoan.id, 'update', updatedLoan);
 
-    const loanAlloc: SettlementAllocation = {
-      id: newId(),
-      settlement_id: settlement.id,
-      partner: 'manager',
-      allocation_type: 'loan_payment',
-      amount_minor: allocation.loanPaymentMinor,
-      loan_id: loan.id,
-      note: `Repaid loan ${loan.id}`,
-      ...newRecord(user.id),
-    };
-    allocations.push(loanAlloc);
-    await repo.insertAllocation(loanAlloc);
-    await enqueueOp('allocation', loanAlloc.id, 'create', loanAlloc);
+      const loanAlloc: SettlementAllocation = {
+        id: newId(),
+        settlement_id: settlement.id,
+        partner: 'manager',
+        allocation_type: 'loan_payment',
+        amount_minor: amount,
+        loan_id: loan.id,
+        note: `Repaid loan ${loan.id}`,
+        ...newRecord(user.id),
+      };
+      allocations.push(loanAlloc);
+      await repo.insertAllocation(loanAlloc);
+      await enqueueOp('allocation', loanAlloc.id, 'create', loanAlloc);
+      remainingToApply -= amount;
+    }
+
+    if (remainingToApply !== 0) throw validationError('Loan repayment could not be fully allocated.');
   }
 
   await recordActivity(user, 'created', 'allocation', settlement.id, `${user.display_name} allocated Manager share`);
@@ -486,7 +566,17 @@ export async function addPayment(
   requirePermission(user, 'payment:mark');
   const settlement = await repo.getSettlementById(input.settlement_id);
   if (!settlement) throw notFound('Settlement not found.');
-  if (input.amount_minor <= 0) throw validationError('Payment must be greater than zero.');
+  requireMinorAmount(input.amount_minor, 'Payment must be greater than zero.');
+
+  const existingPayments = await repo.getPaymentsForSettlement(settlement.id);
+  const partnerDue = input.partner === 'admin' ? settlement.admin_due_minor : settlement.manager_due_minor;
+  const partnerPaid = existingPayments
+    .filter((payment) => payment.partner === input.partner)
+    .reduce((sum, payment) => sum + payment.amount_minor, 0);
+  if (partnerDue <= 0) throw validationError(`There is no payment due to the ${input.partner} for this settlement.`);
+  if (input.amount_minor > partnerDue - partnerPaid) {
+    throw validationError(`Payment exceeds the remaining ${input.partner} balance.`);
+  }
 
   const p: Payment = {
     id: newId(),
@@ -502,9 +592,12 @@ export async function addPayment(
   await enqueueOp('payment', p.id, 'create', p);
 
   const payments = await repo.getPaymentsForSettlement(settlement.id);
-  const totalPaid = payments.reduce((s, x) => s + x.amount_minor, 0);
-  const totalDue = settlement.admin_due_minor + settlement.manager_due_minor;
-  const newStatus = totalPaid <= 0 ? 'pending' : totalPaid >= totalDue ? 'paid' : 'partial';
+  const paidFor = (partner: Payment['partner']) =>
+    payments.filter((payment) => payment.partner === partner).reduce((sum, payment) => sum + payment.amount_minor, 0);
+  const adminComplete = paidFor('admin') >= Math.max(0, settlement.admin_due_minor);
+  const managerComplete = paidFor('manager') >= Math.max(0, settlement.manager_due_minor);
+  const totalPaid = payments.reduce((sum, payment) => sum + payment.amount_minor, 0);
+  const newStatus = adminComplete && managerComplete ? 'paid' : totalPaid > 0 ? 'partial' : 'pending';
   const updatedSettlement: MonthlySettlement = {
     ...settlement,
     status: newStatus,

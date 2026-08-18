@@ -7,6 +7,6 @@ interface UiState {
 }
 
 export const useUiStore = create<UiState>((set) => ({
-  theme: 'system',
+  theme: 'dark',
   setTheme: (theme) => set({ theme }),
 }));

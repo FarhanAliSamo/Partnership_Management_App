@@ -10,7 +10,8 @@ import {
   SETTLEMENT_STATUS_LABELS,
 } from '@/constants/enums';
 import { formatDateDisplay, formatMonthDisplay } from '@/utils/date';
-import type { Expense, Investment, Loan, MonthlySettlement } from '@/types';
+import { usePartnerNames } from '@/hooks/usePartnerNames';
+import type { Expense, Investment, Loan, MonthlySettlement, Partner } from '@/types';
 
 function Row({ label, value }: { label: string; value: React.ReactNode }) {
   const palette = useTheme();
@@ -43,10 +44,11 @@ export function SyncIndicator({ syncState }: { syncState: string }) {
 
 /** Human label: "Friend owes you" direction depends on who the borrower is from
  *  the current viewer's perspective. We report both directions explicitly. */
-export function loanDirectionLabel(loan: Pick<Loan, 'borrower' | 'lender'>): string {
-  // Admin is the owner ("me"); Manager is "friend".
-  if (loan.borrower === 'manager') return 'Friend owes you';
-  return 'You owe friend';
+export function loanDirectionLabel(
+  loan: Pick<Loan, 'borrower' | 'lender'>,
+  viewer: Partner = 'admin'
+): string {
+  return loan.borrower === viewer ? 'You owe friend' : 'Friend owes you';
 }
 
 export function EarningCard({
@@ -69,6 +71,7 @@ export function EarningCard({
   onPress?: () => void;
 }) {
   const palette = useTheme();
+  const { adminName, managerName } = usePartnerNames();
   const closed = status === 'closed';
   return (
     <Card onPress={onPress}>
@@ -88,8 +91,8 @@ export function EarningCard({
       ) : (
         <View style={{ marginTop: 8, gap: 2 }}>
           <Row label="Daily total" value={<MoneyText minor={totalMinor} style={{ fontWeight: '700' }} />} />
-          <Row label="Your share" value={<MoneyText minor={adminMinor} style={{ color: palette.textSecondary }} />} />
-          <Row label="Friend share" value={<MoneyText minor={managerMinor} style={{ color: palette.textSecondary }} />} />
+          <Row label={`${adminName} share`} value={<MoneyText minor={adminMinor} style={{ color: palette.textSecondary }} />} />
+          <Row label={`${managerName} share`} value={<MoneyText minor={managerMinor} style={{ color: palette.textSecondary }} />} />
         </View>
       )}
       {onPress ? <ViewDetails /> : null}
@@ -131,28 +134,56 @@ export function InvestmentCard({ investment, onPress }: { investment: Investment
   );
 }
 
-export function LoanCard({ loan, onPress }: { loan: Loan; onPress?: () => void }) {
+export function LoanCard({ loan, onPress, viewer = 'admin' }: { loan: Loan; onPress?: () => void; viewer?: Partner }) {
   const palette = useTheme();
-  const label = loanDirectionLabel(loan);
+  const { adminName, managerName } = usePartnerNames();
+  const friendName = viewer === 'manager' ? adminName : managerName;
+  const label = loan.borrower === viewer ? `You owe ${friendName}` : `${friendName} owes you`;
   const statusLabel = LOAN_STATUS_LABELS[loan.status] ?? loan.status;
+  const owesMe = loan.borrower !== viewer;
+  const paid = Math.max(0, loan.amount_minor - loan.remaining_minor);
+  const progress = loan.amount_minor > 0 ? paid / loan.amount_minor : 0;
   return (
     <Card onPress={onPress}>
       <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' }}>
         <Text style={{ color: palette.text, fontSize: 16, fontWeight: '600' }}>{label}</Text>
         <Badge
           label={statusLabel}
-          tone={loan.status === 'paid' ? 'success' : 'warning'}
+          tone={loan.status === 'paid' ? 'success' : owesMe ? 'success' : 'danger'}
         />
       </View>
-      <Row label="Remaining" value={<MoneyText minor={loan.remaining_minor} style={{ fontWeight: '700' }} />} />
-      <Row label="Original" value={<MoneyText minor={loan.amount_minor} style={{ color: palette.textSecondary }} />} />
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 8 }}>
+        <Text style={{ color: palette.textMuted, fontSize: 13 }}>Remaining</Text>
+        <MoneyText minor={loan.remaining_minor} style={{ fontWeight: '700', color: loan.remaining_minor > 0 ? (owesMe ? palette.success : palette.danger) : palette.text }} />
+      </View>
+      <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 2 }}>
+        <Text style={{ color: palette.textMuted, fontSize: 13 }}>Original</Text>
+        <MoneyText minor={loan.amount_minor} style={{ color: palette.textSecondary }} />
+      </View>
+      <View style={{ height: 6, borderRadius: 3, backgroundColor: palette.surfaceAlt, marginTop: 12, overflow: 'hidden' }}>
+        <View
+          style={{
+            height: 6,
+            borderRadius: 3,
+            width: `${Math.round(progress * 100)}%`,
+            backgroundColor: loan.status === 'paid' ? palette.success : palette.info,
+          }}
+        />
+      </View>
       {onPress ? <ViewDetails /> : null}
     </Card>
   );
 }
 
-export function SettlementCard({ settlement, onPress }: { settlement: MonthlySettlement; onPress?: () => void }) {
+export function SettlementCard({
+  settlement,
+  onPress,
+}: {
+  settlement: MonthlySettlement;
+  onPress?: () => void;
+}) {
   const palette = useTheme();
+  const { adminName, managerName } = usePartnerNames();
   const tone =
     settlement.status === 'paid' ? 'success' : settlement.status === 'partial' ? 'warning' : 'neutral';
   const statusLabel = SETTLEMENT_STATUS_LABELS[settlement.status] ?? settlement.status;
@@ -164,8 +195,8 @@ export function SettlementCard({ settlement, onPress }: { settlement: MonthlySet
         </Text>
         <Badge label={statusLabel} tone={tone} />
       </View>
-      <Row label="Your final due" value={<MoneyText minor={settlement.admin_due_minor} />} />
-      <Row label="Friend final due" value={<MoneyText minor={settlement.manager_due_minor} />} />
+      <Row label={`${adminName} final due`} value={<MoneyText minor={settlement.admin_due_minor} />} />
+      <Row label={`${managerName} final due`} value={<MoneyText minor={settlement.manager_due_minor} />} />
       {onPress ? <ViewDetails /> : null}
     </Card>
   );

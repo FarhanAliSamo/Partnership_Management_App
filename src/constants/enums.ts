@@ -18,8 +18,8 @@ export const SYNC_LABELS: Record<string, string> = {
 
 export const DAY_LABELS: Record<string, string> = {
   open: 'Open',
-  open_zero: 'Open — Rs. 0',
-  closed: 'Closed — No Earning',
+  open_zero: 'Open day, PKR 0',
+  closed: 'Closed, no earning',
 };
 
 export const LOAN_STATUS_LABELS: Record<string, string> = {

@@ -5,6 +5,8 @@ import type { BusinessSettings } from '@/types';
  */
 export const DEFAULT_SETTINGS: BusinessSettings = {
   businessName: 'Gaming Zone',
+  adminName: 'Farhan',
+  managerName: 'Friend',
   currency: 'PKR',
   currencyMinorUnits: 2,
   adminSharePercent: 50,
@@ -40,11 +42,11 @@ export const DEFAULT_SETTINGS: BusinessSettings = {
 export const DEFAULT_ADMIN = {
   id: 'user-admin',
   username: 'admin',
-  display_name: 'Admin',
+  display_name: 'Farhan',
 };
 
 export const DEFAULT_MANAGER = {
   id: 'user-manager',
   username: 'manager',
-  display_name: 'Manager',
+  display_name: 'Friend',
 };

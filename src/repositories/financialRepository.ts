@@ -320,6 +320,10 @@ export async function getSettlementById(id: string): Promise<MonthlySettlement |
   );
 }
 
+export async function deleteSettlement(id: string): Promise<void> {
+  await softDeleteById('monthly_settlements', id);
+}
+
 export async function getAllSettlements(): Promise<MonthlySettlement[]> {
   return queryAll<MonthlySettlement>(
     `SELECT * FROM monthly_settlements WHERE deleted_at IS NULL ORDER BY month DESC`
@@ -405,6 +409,104 @@ export async function getPendingAttachments(): Promise<Attachment[]> {
   return queryAll<Attachment>(
     `SELECT * FROM attachments WHERE deleted_at IS NULL AND upload_state IN ('pending','failed') ORDER BY created_at ASC`
   );
+}
+
+const ENTITY_TABLE_MAP: Record<string, string> = {
+  earning: 'earnings',
+  expense: 'expenses',
+  investment: 'investments',
+  loan: 'loans',
+  repayment: 'loan_repayments',
+  settlement: 'monthly_settlements',
+  allocation: 'settlement_allocations',
+  payment: 'payments',
+  daily_status: 'daily_business_status',
+};
+
+/** Mark a record as synced after its queued operation is pushed successfully. */
+export async function markEntitySynced(entityType: string, entityId: string): Promise<void> {
+  const table = ENTITY_TABLE_MAP[entityType];
+  if (!table) return;
+  await enqueueWrite(() =>
+    exec(`UPDATE ${table} SET sync_state = 'synced' WHERE id = ?`, [entityId])
+  );
+}
+
+const NUMERIC_COLUMNS = new Set([
+  'amount_minor',
+  'total_earning_minor',
+  'shared_expense_minor',
+  'net_profit_minor',
+  'admin_share_minor',
+  'manager_share_minor',
+  'admin_expense_minor',
+  'admin_due_minor',
+  'manager_due_minor',
+  'remaining_minor',
+  'local_version',
+  'remote_version',
+  'is_wifi',
+  'biometric_enabled',
+  'size_bytes',
+]);
+
+/**
+ * Merge rows pulled from the cloud into local SQLite.
+ *
+ * Rules (safe, non-destructive):
+ * - Cloud row marked deleted → soft-delete locally (so partner deletes propagate).
+ * - Cloud row missing locally → insert it (so the other partner's entries appear).
+ * - Cloud row already present locally → keep local; local edits win and are pushed up.
+ *
+ * Pulled rows are always stored with sync_state = 'synced' (they are canonical
+ * from the cloud), and Postgres `bigint`/numeric strings are coerced to numbers.
+ */
+export async function mergeRemoteRows(
+  entityType: string,
+  rows: Record<string, unknown>[]
+): Promise<void> {
+  const table = ENTITY_TABLE_MAP[entityType];
+  if (!table) return;
+
+  for (const raw of rows) {
+    const id = raw.id as string | undefined;
+    if (!id) continue;
+
+    const existing = await queryFirst<{ id: string }>(
+      `SELECT id FROM ${table} WHERE id = ?`,
+      [id]
+    );
+
+    if (raw.deleted_at != null) {
+      if (existing) {
+        await enqueueWrite(() =>
+          exec(`UPDATE ${table} SET deleted_at = ? WHERE id = ?`, [new Date().toISOString(), id])
+        );
+      }
+      continue;
+    }
+
+    if (existing) continue; // local is source of truth; its pending changes push up
+
+    // Normalize the row for SQLite (numbers + force synced).
+    const normalized: Record<string, unknown> = { ...raw, sync_state: 'synced' };
+    for (const key of Object.keys(normalized)) {
+      const value = normalized[key];
+      if (typeof value === 'string' && NUMERIC_COLUMNS.has(key) && value !== '') {
+        const n = Number(value);
+        if (Number.isFinite(n)) normalized[key] = n;
+      }
+    }
+
+    const keys = Object.keys(normalized).filter((k) => normalized[k] !== undefined);
+    const cols = keys.join(', ');
+    const placeholders = keys.map(() => '?').join(', ');
+    const values = keys.map((k) => normalized[k]) as unknown as unknown[];
+
+    await enqueueWrite(() =>
+      exec(`INSERT OR IGNORE INTO ${table} (${cols}) VALUES (${placeholders})`, values as never)
+    );
+  }
 }
 
 /* ------------------------- Daily state helpers ------------------------- */

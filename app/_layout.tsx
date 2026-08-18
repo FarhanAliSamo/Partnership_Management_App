@@ -5,7 +5,10 @@ import { StatusBar } from 'expo-status-bar';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { seedDatabase } from '@/services/seedService';
 import { useAuthStore } from '@/stores/useAuthStore';
+import { useSyncStore } from '@/stores/useSyncStore';
+import { subscribeData } from '@/lib/dataEvents';
 import { ToastHost } from '@/components/ToastHost';
+import { requestNotificationPermissions, scheduleDailyReminderIfNeeded } from '@/services/notificationService';
 
 const queryClient = new QueryClient();
 
@@ -35,6 +38,8 @@ export default function RootLayout() {
       if (!mounted) return;
       try {
         await restore();
+        const notificationsAllowed = await requestNotificationPermissions().catch(() => false);
+        if (notificationsAllowed) await scheduleDailyReminderIfNeeded().catch(() => undefined);
       } catch {
         // best-effort
       }
@@ -49,6 +54,17 @@ export default function RootLayout() {
       clearTimeout(failSafe);
     };
   }, [restore]);
+
+  // Auto-sync on start and whenever local data changes (online-aware).
+  useEffect(() => {
+    if (!ready) return;
+    const sync = useSyncStore.getState();
+    sync.autoSync();
+    const unsubscribe = subscribeData(() => {
+      useSyncStore.getState().syncNow();
+    });
+    return unsubscribe;
+  }, [ready]);
 
   if (!ready) {
     // Brief loading surface while seed + restore run.
@@ -75,8 +91,10 @@ export default function RootLayout() {
         <Stack.Screen name="(auth)" />
         <Stack.Screen name="(tabs)" />
         <Stack.Screen name="earning/add" options={{ presentation: 'modal', headerShown: true, title: 'Add Earning' }} />
+        <Stack.Screen name="earning/edit" options={{ presentation: 'modal', headerShown: true, title: 'Edit Earning' }} />
         <Stack.Screen name="earning/close-day" options={{ presentation: 'modal', headerShown: true, title: 'Shop Closed' }} />
         <Stack.Screen name="expense/add" options={{ presentation: 'modal', headerShown: true, title: 'Add Expense' }} />
+        <Stack.Screen name="expense/edit" options={{ presentation: 'modal', headerShown: true, title: 'Edit Expense' }} />
       </Stack>
       <ToastHost />
     </QueryClientProvider>

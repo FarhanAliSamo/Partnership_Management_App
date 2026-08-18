@@ -333,11 +333,11 @@ export function SegmentedControl<T extends string>({
               paddingVertical: 8,
               borderRadius: radii.sm,
               alignItems: 'center',
-              backgroundColor: active ? palette.surface : 'transparent',
+              backgroundColor: active ? palette.info : 'transparent',
             }}
           >
             <Text
-              style={{ color: active ? palette.text : palette.textSecondary, fontSize: 13, fontWeight: '600' }}
+              style={{ color: active ? '#FFFFFF' : palette.textSecondary, fontSize: 13, fontWeight: '600' }}
             >
               {o.label}
             </Text>

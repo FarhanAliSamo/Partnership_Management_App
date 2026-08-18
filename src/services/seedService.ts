@@ -1,11 +1,14 @@
-import { upsertUser } from '@/repositories/userRepository';
 import { upsertRole as saveRole } from '@/repositories/roleRepository';
-import { DEFAULT_ADMIN, DEFAULT_MANAGER, DEFAULT_SETTINGS } from '@/constants/defaults';
+import { DEFAULT_SETTINGS } from '@/constants/defaults';
 import { setManySettings, getAllSettings } from '@/repositories/settingsRepository';
 import { DEFAULT_MANAGER_PERMISSIONS, getAdminPermissions } from './permissionService';
 
 /**
- * Seed roles, users, and default settings on first launch. Idempotent.
+ * Seed roles and default settings on first launch. Idempotent.
+ *
+ * NOTE: Users are intentionally NOT seeded here. Accounts are created in the
+ * database (local SQLite, synced to Supabase) via the setup flow (first admin)
+ * and the admin "Create User" screen — no hardcoded credentials in the app.
  */
 export async function seedDatabase(): Promise<void> {
   await saveRole({
@@ -21,21 +24,7 @@ export async function seedDatabase(): Promise<void> {
     permissions: DEFAULT_MANAGER_PERMISSIONS as Record<string, boolean>,
   });
 
-  await upsertUser({
-    id: DEFAULT_ADMIN.id,
-    username: DEFAULT_ADMIN.username,
-    display_name: DEFAULT_ADMIN.display_name,
-    role_key: 'admin',
-  });
-  await upsertUser({
-    id: DEFAULT_MANAGER.id,
-    username: DEFAULT_MANAGER.username,
-    display_name: DEFAULT_MANAGER.display_name,
-    role_key: 'manager',
-  });
-
-  // Ensure settings exist (merges defaults with any user-set values)
+  // Ensure settings exist (merges defaults with any user-set values).
   const existing = await getAllSettings();
   await setManySettings({ ...DEFAULT_SETTINGS, ...existing });
 }
-

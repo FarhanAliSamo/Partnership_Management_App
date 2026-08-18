@@ -22,7 +22,17 @@ export default function TabsLayout() {
         headerShown: false,
         tabBarActiveTintColor: palette.info,
         tabBarInactiveTintColor: palette.textMuted,
-        tabBarStyle: { backgroundColor: palette.surface, borderTopColor: palette.border },
+        tabBarActiveBackgroundColor: `${palette.info}12`,
+        tabBarStyle: {
+          backgroundColor: palette.surface,
+          borderTopColor: palette.border,
+          elevation: 12,
+          shadowColor: '#000',
+          shadowOpacity: 0.2,
+          shadowRadius: 12,
+          shadowOffset: { width: 0, height: -3 },
+        },
+        tabBarLabelStyle: { fontSize: 11, fontWeight: '600' },
       }}
     >
       <Tabs.Screen

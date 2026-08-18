@@ -163,6 +163,8 @@ export interface ActivityLog {
 
 export interface BusinessSettings {
   businessName: string;
+  adminName: string;
+  managerName: string;
   currency: string;
   currencyMinorUnits: number;
   adminSharePercent: number;

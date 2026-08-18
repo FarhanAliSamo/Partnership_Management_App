@@ -6,9 +6,11 @@ import { useAuthStore } from '@/stores/useAuthStore';
 import { useSyncStore } from '@/stores/useSyncStore';
 import { useUiStore } from '@/stores/useUiStore';
 import { getAllSettings, setManySettings } from '@/repositories/settingsRepository';
+import { listUsers } from '@/repositories/userRepository';
 import { canForUser } from '@/services/permissionService';
-import { relativeTimeFrom } from '@/utils/date';
 import * as authService from '@/services/authService';
+import { relativeTimeFrom } from '@/utils/date';
+import type { RoleKey, User } from '@/types';
 import {
   deviceSupportsBiometric,
   authenticateWithBiometrics,
@@ -30,8 +32,34 @@ export default function SettingsScreen() {
   const [saved, setSaved] = useState(false);
   const [bioSupported, setBioSupported] = useState(false);
   const [bioEnabled, setBioEnabled] = useState(false);
+  const [users, setUsers] = useState<User[]>([]);
+  const [adminName, setAdminName] = useState('');
+  const [managerName, setManagerName] = useState('');
+  const [currentPass, setCurrentPass] = useState('');
+  const [newPass, setNewPass] = useState('');
+  const [passError, setPassError] = useState<string | null>(null);
+  const [passSaving, setPassSaving] = useState(false);
+
+  const [newUsername, setNewUsername] = useState('');
+  const [newDisplayName, setNewDisplayName] = useState('');
+  const [newRole, setNewRole] = useState<RoleKey>('manager');
+  const [newUserPass, setNewUserPass] = useState('');
+  const [userError, setUserError] = useState<string | null>(null);
+  const [userSaving, setUserSaving] = useState(false);
 
   const canBusiness = canForUser(user, 'settings:business');
+  const canManageUsers = canForUser(user, 'permission:manage');
+
+  useEffect(() => {
+    (async () => {
+      const list = await listUsers();
+      setUsers(list);
+      const admin = list.find((u) => u.role_key === 'admin');
+      const manager = list.find((u) => u.role_key === 'manager');
+      setAdminName(admin?.display_name ?? '');
+      setManagerName(manager?.display_name ?? '');
+    })();
+  }, []);
 
   useEffect(() => {
     refresh();
@@ -73,6 +101,45 @@ export default function SettingsScreen() {
     }
   };
 
+  const savePartnerNames = async () => {
+    if (!user) return;
+    const setUser = useAuthStore.getState().setUser;
+    const admin = users.find((u) => u.role_key === 'admin');
+    const manager = users.find((u) => u.role_key === 'manager');
+    try {
+      if (admin && adminName.trim()) {
+        const updated = await authService.renameUser(admin.id, adminName.trim());
+        if (user.id === admin.id) setUser(updated);
+      }
+      if (manager && managerName.trim()) {
+        const updated = await authService.renameUser(manager.id, managerName.trim());
+        if (user.id === manager.id) setUser(updated);
+      }
+      await setManySettings({ adminName: adminName.trim(), managerName: managerName.trim() });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch {
+      /* validation error — keep form visible */
+    }
+  };
+
+  const savePassword = async () => {
+    if (!user) return;
+    setPassError(null);
+    setPassSaving(true);
+    try {
+      await authService.changePasscode(user.id, currentPass, newPass);
+      setCurrentPass('');
+      setNewPass('');
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2000);
+    } catch (e) {
+      setPassError(e instanceof Error ? e.message : 'Could not update password.');
+    } finally {
+      setPassSaving(false);
+    }
+  };
+
   const themeOptions: { key: ThemeMode; label: string }[] = [
     { key: 'light', label: 'Light' },
     { key: 'dark', label: 'Dark' },
@@ -91,6 +158,13 @@ export default function SettingsScreen() {
             <Button title={saved ? 'Saved ✓' : 'Save Business Settings'} onPress={saveBusiness} />
           </Card>
         ) : null}
+
+        <Card>
+          <Text style={{ color: palette.text, fontSize: 16, fontWeight: '600', marginBottom: 8 }}>Partner Names</Text>
+          <TextField label="Admin name" value={adminName} onChangeText={setAdminName} />
+          <TextField label="Manager name" value={managerName} onChangeText={setManagerName} />
+          <Button title={saved ? 'Saved ✓' : 'Save Names'} onPress={savePartnerNames} />
+        </Card>
 
         <Card>
           <Text style={{ color: palette.text, fontSize: 16, fontWeight: '600', marginBottom: 8 }}>Sync</Text>
@@ -122,20 +196,28 @@ export default function SettingsScreen() {
           </View>
         </Card>
 
-        <Card>
-          <Text style={{ color: palette.text, fontSize: 16, fontWeight: '600', marginBottom: 8 }}>Security</Text>
-          {bioSupported ? (
-            <ToggleRow
-              label="Face ID / Fingerprint lock"
-              value={bioEnabled}
-              onChange={toggleBiometric}
-            />
-          ) : (
-            <Text style={{ color: palette.textSecondary, fontSize: 14 }}>
-              Biometric unlock is not available on this device.
-            </Text>
-          )}
-        </Card>
+          <Card>
+            <Text style={{ color: palette.text, fontSize: 16, fontWeight: '600', marginBottom: 8 }}>Security</Text>
+            {bioSupported ? (
+              <ToggleRow
+                label="Face ID / Fingerprint lock"
+                value={bioEnabled}
+                onChange={toggleBiometric}
+              />
+            ) : (
+              <Text style={{ color: palette.textSecondary, fontSize: 14 }}>
+                Biometric unlock is not available on this device.
+              </Text>
+            )}
+          </Card>
+
+          <Card>
+            <Text style={{ color: palette.text, fontSize: 16, fontWeight: '600', marginBottom: 8 }}>Change Password</Text>
+            <TextField label="Current password" value={currentPass} onChangeText={setCurrentPass} secureTextEntry />
+            <TextField label="New password" value={newPass} onChangeText={setNewPass} secureTextEntry />
+            {passError ? <Text style={{ color: palette.danger, fontSize: 13, marginBottom: 8 }}>{passError}</Text> : null}
+            <Button title={passSaving ? 'Saving…' : 'Update Password'} onPress={savePassword} disabled={passSaving} />
+          </Card>
       </ScrollView>
     </Screen>
   );

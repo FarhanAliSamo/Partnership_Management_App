@@ -17,15 +17,8 @@ export interface PickedPhoto {
   mimeType?: string;
 }
 
-/**
- * Launch camera or gallery, then compress and persist locally.
- */
-export async function pickAndPersistPhoto(
-  user: User,
-  entityType: PhotoEntity,
-  entityId: string,
-  source: 'camera' | 'gallery'
-): Promise<Attachment> {
+/** Pick one camera photo or up to five proof/receipt photos from the gallery. */
+export async function pickPhotos(source: 'camera' | 'gallery'): Promise<PickedPhoto[]> {
   const permission =
     source === 'camera'
       ? await ImagePicker.requestCameraPermissionsAsync()
@@ -38,14 +31,45 @@ export async function pickAndPersistPhoto(
   const result =
     source === 'camera'
       ? await ImagePicker.launchCameraAsync({ quality: 0.7 })
-      : await ImagePicker.launchImageLibraryAsync({ quality: 0.7, mediaTypes: ['images'] });
+      : await ImagePicker.launchImageLibraryAsync({
+          quality: 0.7,
+          mediaTypes: ['images'],
+          allowsMultipleSelection: true,
+          selectionLimit: 5,
+        });
 
   if (result.canceled || !result.assets || result.assets.length === 0) {
-    throw new Error('No photo selected.');
+    return [];
   }
 
-  const asset = result.assets[0]!;
-  return persistPhoto(user, entityType, entityId, asset.uri, asset.mimeType ?? 'image/jpeg');
+  return result.assets.map((asset) => ({
+    uri: asset.uri,
+    width: asset.width,
+    height: asset.height,
+    mimeType: asset.mimeType ?? 'image/jpeg',
+  }));
+}
+
+/** Persist one selected photo after the parent financial record has an ID. */
+export async function persistPickedPhoto(
+  user: User,
+  entityType: PhotoEntity,
+  entityId: string,
+  photo: PickedPhoto
+): Promise<Attachment> {
+  return persistPhoto(user, entityType, entityId, photo.uri, photo.mimeType ?? 'image/jpeg');
+}
+
+/** Backwards-compatible single-photo helper. */
+export async function pickAndPersistPhoto(
+  user: User,
+  entityType: PhotoEntity,
+  entityId: string,
+  source: 'camera' | 'gallery'
+): Promise<Attachment> {
+  const photos = await pickPhotos(source);
+  if (!photos[0]) throw new Error('No photo selected.');
+  return persistPickedPhoto(user, entityType, entityId, photos[0]);
 }
 
 async function persistPhoto(

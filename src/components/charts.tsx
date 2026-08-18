@@ -3,6 +3,40 @@ import { View, Text } from 'react-native';
 import Svg, { Rect, Line, Circle, Path } from 'react-native-svg';
 import { useTheme } from '@/theme/useTheme';
 
+/** Compact sparkline for subtle trend/momentum hints. */
+export function Sparkline({
+  data,
+  height = 36,
+  width = 120,
+  color,
+}: {
+  data: number[];
+  height?: number;
+  width?: number;
+  color?: string;
+}) {
+  const palette = useTheme();
+  const stroke = color ?? palette.info;
+  if (data.length < 2) return <View style={{ width, height }} />;
+  const max = Math.max(...data, 1);
+  const min = Math.min(...data, 0);
+  const range = max - min || 1;
+  const stepX = width / (data.length - 1);
+  const points = data.map((v, i) => {
+    const x = i * stepX;
+    const y = height - 4 - ((v - min) / range) * (height - 8);
+    return [x, y] as const;
+  });
+  const d = points.map(([x, y], i) => `${i === 0 ? 'M' : 'L'} ${x} ${y}`).join(' ');
+  const last = points[points.length - 1]!;
+  return (
+    <Svg width={width} height={height}>
+      <Path d={d} fill="none" stroke={stroke} strokeWidth={2} strokeLinecap="round" />
+      <Circle cx={last[0]} cy={last[1]} r={2.5} fill={stroke} />
+    </Svg>
+  );
+}
+
 export function BarChart({
   data,
   height = 160,

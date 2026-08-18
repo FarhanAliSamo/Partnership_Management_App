@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { View, Text } from 'react-native';
 import { useRouter } from 'expo-router';
 import { Screen, TextField, Button } from '@/components/ui';
-import { DateField, MoneyField } from '@/components/fields';
+import { DateField, MoneyField, PhotoPicker } from '@/components/fields';
 import { useTheme } from '@/theme/useTheme';
 import { useAuthStore } from '@/stores/useAuthStore';
 import { useToastStore } from '@/stores/useToastStore';
@@ -11,6 +11,7 @@ import { toUserMessage } from '@/services/errors';
 import { parseIntAmount } from '@/services/calculation/money';
 import { getAllSettings } from '@/repositories/settingsRepository';
 import { todayISO } from '@/utils/date';
+import { persistPickedPhoto, type PickedPhoto } from '@/services/fileService';
 
 export default function AddExpenseScreen() {
   const palette = useTheme();
@@ -24,6 +25,7 @@ export default function AddExpenseScreen() {
   const [category, setCategory] = useState('Other');
   const [description, setDescription] = useState('');
   const [notes, setNotes] = useState('');
+  const [photos, setPhotos] = useState<PickedPhoto[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -49,14 +51,15 @@ export default function AddExpenseScreen() {
     }
     setSaving(true);
     try {
-      await addExpense(user, {
+      const expense = await addExpense(user, {
         business_date: date,
         amount_minor: parseIntAmount(major, units),
         category,
         description: description || category,
         notes: notes || null,
       });
-      showToast('Expense added');
+      await Promise.all(photos.map((photo) => persistPickedPhoto(user, 'expense', expense.id, photo)));
+      showToast(photos.length ? 'Expense and photos saved' : 'Expense added');
       router.back();
     } catch (e) {
       setError(toUserMessage(e));
@@ -93,6 +96,7 @@ export default function AddExpenseScreen() {
 
       <TextField label="Description" value={description} onChangeText={setDescription} placeholder="Description" />
       <TextField label="Notes (optional)" value={notes} onChangeText={setNotes} placeholder="Notes" multiline />
+      <PhotoPicker photos={photos} onChange={setPhotos} label="Receipt / expense photos (optional)" />
       {error ? <Text style={{ color: palette.danger, marginBottom: 12 }}>{error}</Text> : null}
       <Button title={saving ? 'Saving…' : 'Save Expense'} onPress={submit} disabled={saving} />
     </Screen>

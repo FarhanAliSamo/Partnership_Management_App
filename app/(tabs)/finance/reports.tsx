@@ -5,6 +5,7 @@ import { BarChart } from '@/components/charts';
 import { useTheme } from '@/theme/useTheme';
 import { useEarnings, useExpenses, useInvestments, useLoans, useSettlements } from '@/hooks';
 import { useAuthStore } from '@/stores/useAuthStore';
+import { usePartnerNames } from '@/hooks/usePartnerNames';
 import { getRoIAnalytics } from '@/services/financeService';
 import { netPositionDisplay } from '@/services/calculation/loans';
 import * as calc from '@/services/calculation';
@@ -15,6 +16,7 @@ import type { RecoveryResult } from '@/services/calculation';
 export default function ReportsScreen() {
   const palette = useTheme();
   const user = useAuthStore((s) => s.user);
+  const { adminName, managerName } = usePartnerNames();
   const { earnings } = useEarnings();
   const { expenses } = useExpenses();
   const { investments } = useInvestments();
@@ -97,9 +99,9 @@ export default function ReportsScreen() {
           <Text style={{ color: palette.textSecondary, fontSize: 13 }}>Outstanding Loans</Text>
           <Text style={{ color: palette.text, fontSize: 15, marginTop: 4 }}>
             {netLoan.kind === 'manager_owes_admin'
-              ? `Manager Owes Admin ${calc.money.format(netLoan.amount, 'PKR', 2)}`
+              ? `${managerName} owes ${adminName} ${calc.money.format(netLoan.amount, 'PKR', 2)}`
               : netLoan.kind === 'admin_owes_manager'
-                ? `Admin Owes Manager ${calc.money.format(netLoan.amount, 'PKR', 2)}`
+                ? `${adminName} owes ${managerName} ${calc.money.format(netLoan.amount, 'PKR', 2)}`
                 : 'No outstanding loans.'}
           </Text>
         </Card>
@@ -115,7 +117,7 @@ export default function ReportsScreen() {
 
         {monthlyData.length > 1 ? (
           <Card>
-            <Text style={{ color: palette.textSecondary, fontSize: 13, marginBottom: 8 }}>Monthly Earnings (Rs. ~000s)</Text>
+            <Text style={{ color: palette.textSecondary, fontSize: 13, marginBottom: 8 }}>Monthly Earnings (PKR ~000s)</Text>
             <BarChart data={monthlyData} />
           </Card>
         ) : null}
